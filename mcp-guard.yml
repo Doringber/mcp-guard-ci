@@ -1,0 +1,10 @@
+servers:
+  - name: clean-fixture
+    command: ["uv", "run", "python", "tests/fixtures/clean_server.py"]
+    smoke:
+      - tool: add
+        args: {a: 2, b: 3}
+        expect_contains: "5"
+fail_on: high
+discover: true
+skills_glob: "skills/**/SKILL.md"

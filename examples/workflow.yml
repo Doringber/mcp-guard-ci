@@ -1,0 +1,21 @@
+# Copy to .github/workflows/mcp-guard.yml in the repo you want to guard,
+# add a mcp-guard.yml next to it, and every PR gets functional + security
+# checks on its MCP servers. No secrets needed for the default YARA path.
+name: mcp-guard
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write   # SARIF upload
+
+jobs:
+  mcp-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Replace <owner> once the action repo is published.
+      - uses: <owner>/mcp-guard-ci/.github/actions/mcp-guard@main
+        with:
+          config: mcp-guard.yml
+          fail-on: high

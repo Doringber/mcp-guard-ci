@@ -1,0 +1,56 @@
+name: mcp-guard
+description: >-
+  Functional smoke tests + YARA security scans for MCP servers (and soon
+  skills/plugins), merged into one SARIF report for the Security tab.
+inputs:
+  config:
+    description: Path to the mcp-guard config file, relative to the repo root
+    default: mcp-guard.yml
+  fail-on:
+    description: Severity that fails the build (low | medium | high)
+    default: high
+  sarif-file:
+    description: SARIF output path
+    default: mcp-guard-results.sarif
+runs:
+  using: composite
+  steps:
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Set up Node.js 22
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Install Cisco mcp-scanner (YARA runs locally, no API key needed)
+      shell: bash
+      run: uv tool install cisco-ai-mcp-scanner
+
+    - name: Install mcp-guard from this action's repository
+      shell: bash
+      run: pip install "${{ github.action_path }}"
+
+    - name: Pre-fetch MCP Inspector (npm cache for the smoke step)
+      shell: bash
+      run: npx -y @modelcontextprotocol/inspector --cli --help > /dev/null
+
+    - name: Run mcp-guard
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: >-
+        mcp-guard run
+        --config "${{ inputs.config }}"
+        --sarif "${{ inputs.sarif-file }}"
+        --fail-on "${{ inputs.fail-on }}"
+
+    - name: Upload SARIF to the Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: ${{ inputs.sarif-file }}

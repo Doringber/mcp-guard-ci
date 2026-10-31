@@ -1,0 +1,5 @@
+servers:
+  - name: poisoned-fixture
+    command: ["uv", "run", "python", "tests/fixtures/poisoned_server.py"]
+fail_on: high
+discover: false
