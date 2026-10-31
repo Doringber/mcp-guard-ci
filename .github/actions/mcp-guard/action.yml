@@ -28,17 +28,20 @@ runs:
     - name: Install uv
       uses: astral-sh/setup-uv@v5
 
+    # Versions below are the ones the MVP was tested against (Oct 2026).
     - name: Install Cisco mcp-scanner (YARA runs locally, no API key needed)
       shell: bash
-      run: uv tool install cisco-ai-mcp-scanner
+      run: uv tool install 'cisco-ai-mcp-scanner==4.8.7'
 
+    # github.action_path is .github/actions/mcp-guard inside the checked-out
+    # action repository; the package root (pyproject.toml) is three levels up.
     - name: Install mcp-guard from this action's repository
       shell: bash
-      run: pip install "${{ github.action_path }}"
+      run: pip install "${{ github.action_path }}/../../.."
 
     - name: Pre-fetch MCP Inspector (npm cache for the smoke step)
       shell: bash
-      run: npx -y @modelcontextprotocol/inspector --cli --help > /dev/null
+      run: npx -y @modelcontextprotocol/inspector@2.13.0 --cli --help > /dev/null
 
     - name: Run mcp-guard
       shell: bash

@@ -35,6 +35,9 @@ class ServerSpec:
     cwd: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     smoke: list[SmokeCall] = field(default_factory=list)
+    # Tools can mutate or delete state without taking arguments, so smoke
+    # calls are opt-in: only `smoke` entries run unless auto_smoke is true.
+    auto_smoke: bool = False
     source: str = "config"  # "config" | path of the discovered config file
 
 
@@ -58,7 +61,10 @@ class GuardConfig:
     fail_on: Severity = Severity.HIGH
     inspector_enabled: bool = True
     cisco_enabled: bool = True
-    inspector_command: str = "npx -y @modelcontextprotocol/inspector"
+    # Pinned to the version this release was tested against (Oct 2026).
+    inspector_command: str = "npx -y @modelcontextprotocol/inspector@2.13.0"
+    cisco_package: str = "cisco-ai-mcp-scanner==4.8.7"
+    auto_smoke: bool = False
     cisco_command: str = "mcp-scanner"
     smoke_timeout: int = 120
     scan_timeout: int = 240

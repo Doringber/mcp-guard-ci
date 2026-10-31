@@ -112,16 +112,28 @@ def call_tool(server: ServerSpec, tool: str, args: dict, *, inspector_command: s
     return True, text
 
 
-def smoke_server(server: ServerSpec, *, inspector_command: str, timeout: int) -> tuple[list[dict], list[Finding]]:
-    """List tools, then smoke-call every tool that takes no required arguments
-    plus every explicitly configured smoke call. Returns (tools, findings)."""
+def planned_calls(tools: list[dict], server: ServerSpec, auto_smoke: bool) -> list[SmokeCall]:
+    """Smoke calls to run for a server.
+
+    Default is deliberately conservative: only explicitly configured calls.
+    A tool that takes no arguments can still mutate or delete state, so
+    auto-calling every no-required-args tool requires auto_smoke=True.
+    """
+    calls = list(server.smoke)
+    if auto_smoke:
+        configured = {c.tool for c in server.smoke}
+        calls += [SmokeCall(tool=t["name"]) for t in tools if _needs_no_args(t) and t["name"] not in configured]
+    return calls
+
+
+def smoke_server(server: ServerSpec, *, inspector_command: str, timeout: int, auto_smoke: bool = False) -> tuple[list[dict], list[Finding]]:
+    """List tools, then run the planned smoke calls. Returns (tools, findings)."""
     tools, err = list_tools(server, inspector_command=inspector_command, timeout=timeout)
     if err is not None:
         return [], [err]
 
     findings: list[Finding] = []
-    calls: list[SmokeCall] = [SmokeCall(tool=t["name"]) for t in tools if _needs_no_args(t)]
-    calls.extend(server.smoke)
+    calls = planned_calls(tools, server, auto_smoke)
     seen: set[str] = set()
     for call in calls:
         key = f"{call.tool}:{json.dumps(call.args, sort_keys=True)}"

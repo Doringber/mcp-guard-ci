@@ -48,14 +48,18 @@ def test_poisoned_fixture_fails_with_high_sarif(tmp_path):
 
 @requires_integration
 @pytest.mark.integration
-def test_broken_server_is_high_finding(tmp_path):
+def test_broken_server_fails_closed(tmp_path):
+    # Inspector reports the dead server as a HIGH functional finding; the
+    # security scan cannot run at all, which is an infrastructure failure and
+    # must fail closed with exit 2 - not hide below the severity gate.
     cfg = tmp_path / "broken.yml"
     cfg.write_text(
         'servers:\n  - name: ghost\n    command: ["python3", "/nonexistent/server.py"]\nfail_on: high\ndiscover: false\n'
     )
     sarif_path = tmp_path / "out.sarif"
     proc = _guard("--config", str(cfg), "--sarif", str(sarif_path))
-    assert proc.returncode == 1, proc.stderr + proc.stdout
+    assert proc.returncode == 2, proc.stderr + proc.stdout
+    assert "checks incomplete" in proc.stderr
     rule_ids = {r["ruleId"] for r in json.loads(sarif_path.read_text())["runs"][0]["results"]}
     assert "mcp-guard/functional-server-start" in rule_ids
 

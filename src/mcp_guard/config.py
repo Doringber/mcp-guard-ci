@@ -38,6 +38,7 @@ def _parse_server(raw: dict, where: str) -> ServerSpec:
         cwd=raw.get("cwd"),
         env={str(k): str(v) for k, v in (raw.get("env") or {}).items()},
         smoke=smoke,
+        auto_smoke=bool(raw.get("auto_smoke", False)),
     )
 
 
@@ -53,6 +54,7 @@ def load_config(path: str | Path) -> GuardConfig:
     cfg.servers = [_parse_server(s, str(p)) for s in data.get("servers", [])]
     cfg.discover = bool(data.get("discover", True))
     cfg.skills_glob = data.get("skills_glob", cfg.skills_glob)
+    cfg.auto_smoke = bool(data.get("auto_smoke", False))
     try:
         cfg.fail_on = Severity.parse(str(data.get("fail_on", "high")))
     except KeyError:

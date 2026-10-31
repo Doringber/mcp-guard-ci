@@ -54,3 +54,12 @@ def test_defaults(tmp_path):
     assert cfg.fail_on == Severity.HIGH
     assert cfg.discover is True
     assert cfg.inspector_enabled and cfg.cisco_enabled
+
+
+def test_auto_smoke_parsing(tmp_path):
+    p = tmp_path / "c.yml"
+    p.write_text("servers:\n  - name: a\n    command: python a.py\n    auto_smoke: true\n  - name: b\n    command: python b.py\nauto_smoke: true\n")
+    cfg = load_config(p)
+    assert cfg.servers[0].auto_smoke is True
+    assert cfg.servers[1].auto_smoke is False
+    assert cfg.auto_smoke is True

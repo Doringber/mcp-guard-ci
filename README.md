@@ -35,7 +35,10 @@ uv tool install cisco-ai-mcp-scanner   # YARA engine, runs locally
 mcp-guard run --config mcp-guard.yml --sarif mcp-guard-results.sarif
 ```
 
-Exit code is `1` when any finding meets `fail_on`, `2` on config/tool errors.
+Exit codes: `0` pass, `1` findings at or above `fail_on`, `2` the checks
+could not complete (bad config, missing npx/mcp-scanner, or a security scan
+that failed to run). A scan that cannot run is never reported as safe: the
+run fails closed with exit `2` regardless of the `fail_on` threshold.
 
 ## Config (`mcp-guard.yml`)
 
@@ -53,8 +56,11 @@ skills_glob: "skills/**/SKILL.md"
 ```
 
 Servers you list explicitly win over discovered ones with the same name.
-Tools whose `inputSchema` has no required properties are smoke-called
-automatically with `{}`.
+
+Smoke calls are explicit by default: only entries under `smoke:` run. A tool
+that takes no arguments can still mutate or delete state, so automatically
+calling every no-required-args tool is opt-in via `auto_smoke: true`
+(top level, or per server).
 
 ## Use as a GitHub Action
 
@@ -70,6 +76,11 @@ uv run pytest tests/unit          # fast, no external tools
 uv run pytest tests/integration   # real Inspector + mcp-scanner runs on
                                   # tests/fixtures (clean + poisoned servers)
 ```
+
+Tested against: Python 3.11.17, @modelcontextprotocol/inspector 2.13.0,
+cisco-ai-mcp-scanner 4.8.7, mcp SDK 2.3.0. The action pins these versions.
+Note the fixtures are small demo servers: green tests here mean the wiring
+and gates work, not that every real-world server will scan cleanly.
 
 `tests/fixtures/poisoned_server.py` and `tests/fixtures/skills/evil-helper/`
 are defensive test data: inert malicious-looking text, never executed.
@@ -96,7 +107,9 @@ change in one upstream tool only touches its own wrapper.
 
 ## Roadmap
 
-- [x] MVP: discovery + Inspector smoke + Cisco YARA scan + SARIF
+- [x] MVP code: discovery + Inspector smoke + Cisco YARA scan + SARIF
+      (tested locally against real tool binaries; first real GitHub PR run
+      still pending - `act` needs Docker and was not available)
 - [ ] Cisco skill-scanner on `SKILL.md` files (fixture already present)
 - [ ] Rug-pull lockfile: `mcp-guard lock` writes `mcp-tools.lock.json`;
       CI fails when a tool's description/schema changes without a lock update

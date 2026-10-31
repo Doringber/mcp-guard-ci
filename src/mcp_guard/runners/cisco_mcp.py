@@ -17,7 +17,16 @@ from ..models import Finding, ServerSpec, Severity
 
 
 class CiscoScannerUnavailable(RuntimeError):
-    pass
+    """The mcp-scanner executable itself is missing."""
+
+
+class CiscoScanError(RuntimeError):
+    """The scan could not complete (server unreachable, timeout, bad output).
+
+    Fail closed: an unscanned server is not a safe server, so the CLI turns
+    this into a nonzero infrastructure exit instead of a finding that might
+    sit below the configured severity gate.
+    """
 
 
 def scan_server(server: ServerSpec, *, cisco_command: str, timeout: int) -> list[Finding]:
@@ -43,38 +52,21 @@ def scan_server(server: ServerSpec, *, cisco_command: str, timeout: int) -> list
             "Install it with: uv tool install cisco-ai-mcp-scanner"
         ) from exc
     except subprocess.TimeoutExpired:
-        return [Finding(
-            rule_id="mcp-guard/scanner-error",
-            severity=Severity.MEDIUM,
-            title=f"Security scan timed out: {server.name}",
-            message=f"mcp-scanner did not finish within {timeout}s.",
-            source="cisco-yara",
-            server=server.name,
-        )]
+        raise CiscoScanError(
+            f"security scan of '{server.name}' timed out after {timeout}s"
+        )
 
     if proc.returncode != 0 or not proc.stdout.strip():
         detail = (proc.stderr or proc.stdout).strip()[:2000] or f"mcp-scanner exited {proc.returncode}"
-        return [Finding(
-            rule_id="mcp-guard/scanner-error",
-            severity=Severity.MEDIUM,
-            title=f"Security scan failed: {server.name}",
-            message=detail,
-            source="cisco-yara",
-            server=server.name,
-        )]
+        raise CiscoScanError(f"security scan of '{server.name}' failed: {detail}")
 
     try:
         payload = json.loads(proc.stdout)
         results = payload.get("scan_results", [])
     except (json.JSONDecodeError, TypeError, AttributeError) as exc:
-        return [Finding(
-            rule_id="mcp-guard/scanner-error",
-            severity=Severity.MEDIUM,
-            title=f"Security scan output unparseable: {server.name}",
-            message=f"mcp-scanner raw output was not the expected JSON: {exc}",
-            source="cisco-yara",
-            server=server.name,
-        )]
+        raise CiscoScanError(
+            f"security scan of '{server.name}' returned unparseable output: {exc}"
+        )
 
     findings: list[Finding] = []
     for result in results:

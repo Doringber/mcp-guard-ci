@@ -11,7 +11,7 @@ from .config import ConfigError, load_config
 from .discover import discover_servers, discover_skills
 from .models import Finding, Severity
 from .report.sarif import build_sarif
-from .runners.cisco_mcp import CiscoScannerUnavailable, scan_server
+from .runners.cisco_mcp import CiscoScanError, CiscoScannerUnavailable, scan_server
 from .runners.inspector import InspectorUnavailable, smoke_server
 
 
@@ -71,6 +71,7 @@ def run(argv: list[str] | None = None) -> int:
         return 2
 
     findings: list[Finding] = []
+    infra_errors: list[str] = []
     server_tools: dict[str, list[dict]] = {}
     do_smoke = cfg.inspector_enabled and not args.skip_smoke
     do_scan = cfg.cisco_enabled and not args.skip_scan
@@ -78,12 +79,20 @@ def run(argv: list[str] | None = None) -> int:
     for server in servers:
         if do_smoke:
             tools, smoke_findings = smoke_server(
-                server, inspector_command=cfg.inspector_command, timeout=cfg.smoke_timeout,
+                server,
+                inspector_command=cfg.inspector_command,
+                timeout=cfg.smoke_timeout,
+                auto_smoke=server.auto_smoke or cfg.auto_smoke,
             )
             server_tools[server.name] = tools
             findings += smoke_findings
         if do_scan:
-            findings += scan_server(server, cisco_command=cfg.cisco_command, timeout=cfg.scan_timeout)
+            try:
+                findings += scan_server(server, cisco_command=cfg.cisco_command, timeout=cfg.scan_timeout)
+            except CiscoScanError as exc:
+                # Fail closed: an incomplete scan means the run cannot be
+                # called safe, independent of the severity gate.
+                infra_errors.append(str(exc))
 
     sarif = build_sarif(findings)
     sarif_path = Path(args.sarif)
@@ -91,6 +100,11 @@ def run(argv: list[str] | None = None) -> int:
     print(_summary(findings, server_tools, skill_files, cfg.fail_on))
     print(f"\nSARIF written to {sarif_path}")
 
+    if infra_errors:
+        for err in infra_errors:
+            print(f"mcp-guard: {err}", file=sys.stderr)
+        print("mcp-guard: checks incomplete (see errors above); failing closed.", file=sys.stderr)
+        return 2
     return 1 if any(f.severity >= cfg.fail_on for f in findings) else 0
 
 
