@@ -60,8 +60,15 @@ def test_broken_server_fails_closed(tmp_path):
     proc = _guard("--config", str(cfg), "--sarif", str(sarif_path))
     assert proc.returncode == 2, proc.stderr + proc.stdout
     assert "checks incomplete" in proc.stderr
-    rule_ids = {r["ruleId"] for r in json.loads(sarif_path.read_text())["runs"][0]["results"]}
+    # never a false clean: no PASS verdict, no all-clear wording
+    assert "**Verdict:** PASS" not in proc.stdout
+    assert "All checks passed" not in proc.stdout
+    assert "**Verdict:** INCOMPLETE" in proc.stdout
+    results = json.loads(sarif_path.read_text())["runs"][0]["results"]
+    rule_ids = {r["ruleId"] for r in results}
     assert "mcp-guard/functional-server-start" in rule_ids
+    assert "mcp-guard/scan-incomplete" in rule_ids
+    assert any(r["level"] == "error" for r in results)
 
 
 def test_no_servers_is_usage_error(tmp_path):
@@ -69,3 +76,14 @@ def test_no_servers_is_usage_error(tmp_path):
     cfg.write_text("servers: []\ndiscover: false\n")
     proc = _guard("--config", str(cfg), "--sarif", str(tmp_path / "o.sarif"))
     assert proc.returncode == 2
+
+
+def test_all_checks_skipped_fails_closed(tmp_path):
+    # --skip-smoke --skip-scan means nothing was verified: must not print PASS.
+    sarif_path = tmp_path / "out.sarif"
+    proc = _guard("--config", "mcp-guard.yml", "--sarif", str(sarif_path),
+                  "--skip-smoke", "--skip-scan")
+    assert proc.returncode == 2, proc.stderr + proc.stdout
+    assert "**Verdict:** PASS" not in proc.stdout
+    results = json.loads(sarif_path.read_text())["runs"][0]["results"]
+    assert {r["ruleId"] for r in results} == {"mcp-guard/no-checks-ran"}

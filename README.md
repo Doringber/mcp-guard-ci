@@ -36,9 +36,13 @@ mcp-guard run --config mcp-guard.yml --sarif mcp-guard-results.sarif
 ```
 
 Exit codes: `0` pass, `1` findings at or above `fail_on`, `2` the checks
-could not complete (bad config, missing npx/mcp-scanner, or a security scan
-that failed to run). A scan that cannot run is never reported as safe: the
-run fails closed with exit `2` regardless of the `fail_on` threshold.
+could not complete (bad config, missing npx/mcp-scanner, a security scan that
+failed to run or returned malformed output, or all checks disabled/skipped).
+An incomplete run is never reported as safe: it fails closed with exit `2`
+regardless of the `fail_on` threshold, prints an INCOMPLETE verdict, and the
+SARIF carries a HIGH `mcp-guard/scan-incomplete` finding so the Security tab
+never shows a false clean. Scanner output is validated strictly - malformed
+or partial results fail the run rather than passing as clean.
 
 ## Config (`mcp-guard.yml`)
 

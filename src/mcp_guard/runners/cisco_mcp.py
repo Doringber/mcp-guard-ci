@@ -62,28 +62,59 @@ def scan_server(server: ServerSpec, *, cisco_command: str, timeout: int) -> list
 
     try:
         payload = json.loads(proc.stdout)
-        results = payload.get("scan_results", [])
-    except (json.JSONDecodeError, TypeError, AttributeError) as exc:
+    except json.JSONDecodeError as exc:
         raise CiscoScanError(
             f"security scan of '{server.name}' returned unparseable output: {exc}"
         )
+    return parse_scan_payload(payload, server.name)
 
+
+def parse_scan_payload(payload: object, server_name: str) -> list[Finding]:
+    """Validate mcp-scanner raw JSON strictly and convert unsafe results.
+
+    Fail closed: anything malformed or incomplete raises CiscoScanError
+    instead of risking a silent 'clean' verdict. Shape verified against
+    cisco-ai-mcp-scanner 4.8.7: {"scan_results": [{"tool_name", "is_safe",
+    "findings": {"yara_analyzer": {"severity", "threat_names",
+    "threat_summary"}}}]}.
+    """
+    if not isinstance(payload, dict) or not isinstance(payload.get("scan_results"), list):
+        raise CiscoScanError(
+            f"security scan of '{server_name}' returned malformed output: "
+            "expected an object with a 'scan_results' list"
+        )
     findings: list[Finding] = []
-    for result in results:
-        if result.get("is_safe", True):
+    for i, result in enumerate(payload["scan_results"]):
+        where = f"scan_results[{i}] for '{server_name}'"
+        if not isinstance(result, dict) or not isinstance(result.get("is_safe"), bool):
+            raise CiscoScanError(f"{where} is malformed: missing boolean 'is_safe'")
+        if result["is_safe"]:
             continue
-        yara = (result.get("findings") or {}).get("yara_analyzer") or {}
-        severity = Severity.parse(str(yara.get("severity", "UNKNOWN")))
-        threats = yara.get("threat_names") or ["unknown threat"]
+        f = result.get("findings")
+        if not isinstance(f, dict) or not isinstance(f.get("yara_analyzer"), dict):
+            raise CiscoScanError(f"{where} is unsafe but has no yara_analyzer findings object")
+        yara = f["yara_analyzer"]
+        severity_raw = yara.get("severity")
+        if not isinstance(severity_raw, str):
+            raise CiscoScanError(f"{where} is missing a string severity")
+        try:
+            severity = Severity.parse(severity_raw)
+        except KeyError:
+            raise CiscoScanError(f"{where} has unknown severity {severity_raw!r}")
+        threats = yara.get("threat_names")
+        if not isinstance(threats, list) or not threats or not all(isinstance(t, str) for t in threats):
+            raise CiscoScanError(f"{where} is unsafe but names no threats")
+        summary = yara.get("threat_summary")
+        tool = result.get("tool_name")
         for threat in threats:
-            rule = "cisco-yara/" + str(threat).lower().replace(" ", "-").replace("/", "-")
+            rule = "cisco-yara/" + threat.lower().replace(" ", "-").replace("/", "-")
             findings.append(Finding(
                 rule_id=rule,
                 severity=severity,
-                title=f"{threat} in tool '{result.get('tool_name', '?')}'",
-                message=yara.get("threat_summary") or f"YARA flagged {threat}",
+                title=f"{threat} in tool '{tool or '?'}'",
+                message=summary if isinstance(summary, str) else f"YARA flagged {threat}",
                 source="cisco-yara",
-                server=server.name,
-                tool=result.get("tool_name"),
+                server=server_name,
+                tool=tool if isinstance(tool, str) else None,
             ))
     return findings

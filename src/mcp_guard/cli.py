@@ -15,7 +15,13 @@ from .runners.cisco_mcp import CiscoScanError, CiscoScannerUnavailable, scan_ser
 from .runners.inspector import InspectorUnavailable, smoke_server
 
 
-def _summary(findings: list[Finding], server_tools: dict[str, list[dict]], skill_files: list[Path], fail_on: Severity) -> str:
+def _summary(
+    findings: list[Finding],
+    server_tools: dict[str, list[dict]],
+    skill_files: list[Path],
+    fail_on: Severity,
+    complete: bool,
+) -> str:
     lines = ["## mcp-guard-ci report", ""]
     for name, tools in server_tools.items():
         lines.append(f"- **{name}**: {len(tools)} tool(s): {', '.join(t['name'] for t in tools) or '(none)'}")
@@ -23,7 +29,8 @@ def _summary(findings: list[Finding], server_tools: dict[str, list[dict]], skill
         lines.append(f"- **skills discovered**: {len(skill_files)} SKILL.md file(s) (skill scanning lands in milestone 2)")
     lines.append("")
     if not findings:
-        lines.append("No findings. All checks passed.")
+        lines.append("No findings from the checks that ran." if complete
+                     else "No findings, but the run is INCOMPLETE - see errors below.")
     else:
         lines.append(f"**{len(findings)} finding(s):**")
         lines.append("")
@@ -34,7 +41,11 @@ def _summary(findings: list[Finding], server_tools: dict[str, list[dict]], skill
             lines.append(f"- [{f.severity.name}] `{f.rule_id}` in **{where}** ({f.source}): {f.title}")
     gate = [f for f in findings if f.severity >= fail_on]
     lines.append("")
-    lines.append(f"**Verdict:** {'FAIL' if gate else 'PASS'} (fail_on={fail_on.name.lower()}, {len(gate)} finding(s) at or above threshold)")
+    if not complete:
+        lines.append("**Verdict:** INCOMPLETE - one or more checks could not finish; failing closed (exit 2). "
+                     "A PASS is only reported when every check completes.")
+    else:
+        lines.append(f"**Verdict:** {'FAIL' if gate else 'PASS'} (fail_on={fail_on.name.lower()}, {len(gate)} finding(s) at or above threshold)")
     return "\n".join(lines)
 
 
@@ -76,6 +87,15 @@ def run(argv: list[str] | None = None) -> int:
     do_smoke = cfg.inspector_enabled and not args.skip_smoke
     do_scan = cfg.cisco_enabled and not args.skip_scan
 
+    if not do_smoke and not do_scan:
+        print("mcp-guard: all checks are disabled or skipped; nothing was verified, failing closed.", file=sys.stderr)
+        Path(args.sarif).write_text(json.dumps(build_sarif([
+            Finding(rule_id="mcp-guard/no-checks-ran", severity=Severity.HIGH,
+                    title="No checks ran", source="mcp-guard",
+                    message="Smoke tests and security scans were both disabled or skipped."),
+        ],), indent=2))
+        return 2
+
     for server in servers:
         if do_smoke:
             tools, smoke_findings = smoke_server(
@@ -91,13 +111,22 @@ def run(argv: list[str] | None = None) -> int:
                 findings += scan_server(server, cisco_command=cfg.cisco_command, timeout=cfg.scan_timeout)
             except CiscoScanError as exc:
                 # Fail closed: an incomplete scan means the run cannot be
-                # called safe, independent of the severity gate.
+                # called safe, independent of the severity gate. Record it as
+                # a HIGH finding so the SARIF report is never a false clean.
                 infra_errors.append(str(exc))
+                findings.append(Finding(
+                    rule_id="mcp-guard/scan-incomplete",
+                    severity=Severity.HIGH,
+                    title=f"Security scan did not complete: {server.name}",
+                    message=str(exc),
+                    source="cisco-yara",
+                    server=server.name,
+                ))
 
     sarif = build_sarif(findings)
     sarif_path = Path(args.sarif)
     sarif_path.write_text(json.dumps(sarif, indent=2))
-    print(_summary(findings, server_tools, skill_files, cfg.fail_on))
+    print(_summary(findings, server_tools, skill_files, cfg.fail_on, complete=not infra_errors))
     print(f"\nSARIF written to {sarif_path}")
 
     if infra_errors:
